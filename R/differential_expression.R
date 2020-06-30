@@ -758,7 +758,7 @@ FindMarkers.Seurat <- function(
   min.cells.feature = 3,
   min.cells.group = 3,
   pseudocount.use = 1,
-  replicate_col = NULL
+  replicate_col = NULL,
   ...
 ) {
   if (!is.null(x = group.by)) {
