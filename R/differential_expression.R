@@ -825,10 +825,10 @@ FindMarkers.Seurat <- function(
     )
   }
   # grab replicates
-  if (!is.null(x = replicate_col)) {
+  if (!is.null(x = replicate.var)) {
     replicates <- FetchData(
       object = object,
-      vars = replicate_col,
+      vars = replicate.var,
       cells = c(cells.1, cells.2)
     )
     replicate.var <- setNames(replicates[,1], rownames(replicates))
