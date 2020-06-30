@@ -605,10 +605,11 @@ FindMarkers.default <- function(
     CheckDots(...)
   }
   # grab replicates
-  if (!is.null(replicate_col)) {
-    replicates = setNames(
-      object[, c(cells.1, cells.2)][[replicate_col]][,1],
-      colnames(object[, c(cells.1, cells.2)])
+  if (!is.null(x = replicate_col)) {
+    replicates <- FetchData(
+      object = object,
+      vars = replicate_col,
+      cells = c(cells.1, cells.2)
     )
   }
 
