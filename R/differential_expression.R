@@ -1627,6 +1627,7 @@ WilcoxDETest <- function(
 # @param cells.2 Group 2 cells
 # @param verbose Print a progress bar
 # @param replicates vector of replicates for object
+# @param latent.vars Confounding variables to adjust for in DE test. Default is NULL.
 # @param ... Extra parameters passed to lme
 #
 # @return Returns a p-value ranked matrix of putative differentially expressed
@@ -1647,6 +1648,7 @@ MixedModelTest <- function(
   cells.1,
   cells.2,
   verbose = TRUE,
+  latent.vars = NULL,
   replicates,
   ...
 ) {
