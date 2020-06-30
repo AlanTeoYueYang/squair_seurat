@@ -430,6 +430,7 @@ FindConservedMarkers <- function(
 #'  minimum detection rate (min.pct) across both cell groups. To use this method,
 #'  please install DESeq2, using the instructions at
 #'  https://bioconductor.org/packages/release/bioc/html/DESeq2.html
+#'  \item{"mixedmodel"} : In development: use mixed models.
 #' }
 #' @param min.pct  only test genes that are detected in a minimum fraction of
 #' min.pct cells in either of the two populations. Meant to speed up the function
@@ -448,6 +449,8 @@ FindConservedMarkers <- function(
 #' @param min.cells.group Minimum number of cells in one of the groups
 #' @param pseudocount.use Pseudocount to add to averaged expression values when
 #' calculating logFC. 1 by default.
+#' @param replicate_col Column of meta data containing replicate information. NULL
+#' by default.
 #'
 #' @importFrom Matrix rowSums rowMeans
 #' @importFrom stats p.adjust
@@ -476,6 +479,7 @@ FindMarkers.default <- function(
   min.cells.feature = 3,
   min.cells.group = 3,
   pseudocount.use = 1,
+  replicate_col = NULL,
   ...
 ) {
   features <- features %||% rownames(x = object)
@@ -600,6 +604,14 @@ FindMarkers.default <- function(
   if (!test.use %in% c('wilcox', 'MAST', 'DESeq2')) {
     CheckDots(...)
   }
+  # grab replicates
+  if (!is.null(replicate_col)) {
+    replicates = setNames(
+      object[, c(cells.1, cells.2)][[replicate_col]][,1],
+      colnames(object[, c(cells.1, cells.2)])
+    )
+  }
+
   de.results <- switch(
     EXPR = test.use,
     'wilcox' = WilcoxDETest(
@@ -666,6 +678,14 @@ FindMarkers.default <- function(
       cells.2 = cells.2,
       latent.vars = latent.vars,
       verbose = verbose
+    ),
+    "mixedmodel" = MixedModelTest(
+      data.use = object[features, c(cells.1, cells.2), drop = FALSE],
+      cells.1 = cells.1,
+      cells.2 = cells.2,
+      latent.vars = latent.vars,
+      verbose = verbose,
+      replicates = replicates
     ),
     stop("Unknown test: ", test.use)
   )
@@ -738,6 +758,7 @@ FindMarkers.Seurat <- function(
   min.cells.feature = 3,
   min.cells.group = 3,
   pseudocount.use = 1,
+  replicate_col = NULL
   ...
 ) {
   if (!is.null(x = group.by)) {
@@ -815,6 +836,7 @@ FindMarkers.Seurat <- function(
     'scale.data' = GetAssayData(object = object[[assay]], slot = "counts"),
     numeric()
   )
+
   de.results <- FindMarkers(
     object = data.use,
     slot = data.slot,
@@ -835,6 +857,7 @@ FindMarkers.Seurat <- function(
     min.cells.feature = min.cells.feature,
     min.cells.group = min.cells.group,
     pseudocount.use = pseudocount.use,
+    replicate_col = replicate_col
     ...
   )
   return(de.results)
@@ -1567,7 +1590,7 @@ WilcoxDETest <- function(
   } else {
     if (getOption('Seurat.limma.wilcox.msg', TRUE)) {
       message(
-        "For a more efficient implementation of the Wilcoxon Rank Sum Test,", 
+        "For a more efficient implementation of the Wilcoxon Rank Sum Test,",
         "\n(default method for FindMarkers) please install the limma package",
         "\n--------------------------------------------",
         "\ninstall.packages('BiocManager')",
@@ -1591,5 +1614,93 @@ WilcoxDETest <- function(
       }
     )
   }
+  return(data.frame(p_val, row.names = rownames(x = data.use)))
+}
+
+# Differential expression using Mixed model to control for replicate
+#
+# Identifies differentially expressed genes between two groups of cells using
+# a mixed model linear regression test.
+#
+# @param data.use Data matrix to test
+# @param cells.1 Group 1 cells
+# @param cells.2 Group 2 cells
+# @param verbose Print a progress bar
+# @param replicates vector of replicates for object
+# @param ... Extra parameters passed to lme
+#
+# @return Returns a p-value ranked matrix of putative differentially expressed
+# features
+#
+#' @importFrom pbapply pbsapply
+#' @importFrom stats anova
+#' @importFrom nlme lme
+#' @importFrom future.apply future_sapply
+#' @importFrom future nbrOfWorkers
+#
+# @export
+#
+# @examples
+#
+MixedModelTest <- function(
+  data.use,
+  cells.1,
+  cells.2,
+  verbose = TRUE,
+  replicates,
+  ...
+) {
+  # setup meta data
+  group.info <- data.frame(
+    group = rep(
+      x = c('Group1', 'Group2'),
+      times = c(length(x = cells.1), length(x = cells.2))
+    )
+  )
+  rownames(group.info) <- c(cells.1, cells.2)
+  group.info[, "group"] <- factor(x = group.info[, "group"])
+
+  # check for latent vars
+  latent.vars <- if (is.null(x = latent.vars)) {
+    group.info
+  } else {
+    cbind(x = group.info, latent.vars)
+  }
+  latent.var.names <- colnames(x = latent.vars)
+  data.use <- data.use[, rownames(x = group.info), drop = FALSE]
+
+  # define the replicate
+  replicates <- replicates[rownames(group.info)]
+  group.info[, "replicate"] <- replicates
+
+  # setup parallels
+  my.sapply <- ifelse(
+    test = verbose && nbrOfWorkers() == 1,
+    yes = pbsapply,
+    no = future_sapply
+  )
+
+  # define the formula to use
+  fmla <- as.formula(object = paste(
+    "GENE ~",
+    paste(latent.var.names, collapse = "+")
+  ))
+
+  p_val <- my.sapply(
+    X = 1:nrow(x = data.use),
+    FUN = function(x) {
+      # construct object to test
+      df = data.frame(
+        GENE = data.use[x,],
+        group = group.info[, 'group'],
+        replicate = group.info[, 'replicate']
+      )
+      return(
+        anova(lme(
+          fmla, random = ~1|replicate, data = df
+        ))['group',]$`p-value`
+      )
+    }
+  )
   return(data.frame(p_val, row.names = rownames(x = data.use)))
 }
