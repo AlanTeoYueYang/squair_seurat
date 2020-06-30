@@ -610,7 +610,7 @@ FindMarkers.default <- function(
       object = object,
       vars = replicate_col,
       cells = c(cells.1, cells.2)
-    )
+    )[,1]
   }
 
   de.results <- switch(
