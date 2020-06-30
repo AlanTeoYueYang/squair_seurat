@@ -479,7 +479,7 @@ FindMarkers.default <- function(
   min.cells.feature = 3,
   min.cells.group = 3,
   pseudocount.use = 1,
-  replicate_col = NULL,
+  replicate.var = NULL,
   ...
 ) {
   features <- features %||% rownames(x = object)
@@ -604,15 +604,6 @@ FindMarkers.default <- function(
   if (!test.use %in% c('wilcox', 'MAST', 'DESeq2')) {
     CheckDots(...)
   }
-  # grab replicates
-  if (!is.null(x = replicate_col)) {
-    replicates <- FetchData(
-      object = object,
-      vars = replicate_col,
-      cells = c(cells.1, cells.2)
-    )
-    replicates <- setNames(replicates[,1], rownames(replicates))
-  }
 
   de.results <- switch(
     EXPR = test.use,
@@ -687,7 +678,7 @@ FindMarkers.default <- function(
       cells.2 = cells.2,
       latent.vars = latent.vars,
       verbose = verbose,
-      replicates = replicates
+      replicate.var = replicate.var
     ),
     stop("Unknown test: ", test.use)
   )
@@ -760,7 +751,7 @@ FindMarkers.Seurat <- function(
   min.cells.feature = 3,
   min.cells.group = 3,
   pseudocount.use = 1,
-  replicate_col = NULL,
+  replicate.var = NULL,
   ...
 ) {
   if (!is.null(x = group.by)) {
@@ -833,6 +824,16 @@ FindMarkers.Seurat <- function(
       cells = c(ident.1, ident.2)
     )
   }
+  # grab replicates
+  if (!is.null(x = replicate_col)) {
+    replicates <- FetchData(
+      object = object,
+      vars = replicate_col,
+      cells = c(cells.1, cells.2)
+    )
+    replicate.var <- setNames(replicates[,1], rownames(replicates))
+  }
+
   counts <- switch(
     EXPR = data.slot,
     'scale.data' = GetAssayData(object = object[[assay]], slot = "counts"),
@@ -859,7 +860,7 @@ FindMarkers.Seurat <- function(
     min.cells.feature = min.cells.feature,
     min.cells.group = min.cells.group,
     pseudocount.use = pseudocount.use,
-    replicate_col = replicate_col,
+    replicate.var = replicate.var,
     ...
   )
   return(de.results)
@@ -1651,7 +1652,7 @@ MixedModelTest <- function(
   cells.2,
   verbose = TRUE,
   latent.vars = NULL,
-  replicates,
+  replicate.var,
   ...
 ) {
   # setup meta data
@@ -1675,7 +1676,7 @@ MixedModelTest <- function(
 
   # define the replicate
   replicates <- replicates[rownames(group.info)]
-  group.info[, "replicate"] <- replicates
+  group.info[, "replicate"] <- replicate.var
 
   # setup parallels
   my.sapply <- ifelse(
