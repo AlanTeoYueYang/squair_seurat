@@ -857,7 +857,7 @@ FindMarkers.Seurat <- function(
     min.cells.feature = min.cells.feature,
     min.cells.group = min.cells.group,
     pseudocount.use = pseudocount.use,
-    replicate_col = replicate_col
+    replicate_col = replicate_col,
     ...
   )
   return(de.results)
