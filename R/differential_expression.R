@@ -1675,7 +1675,7 @@ MixedModelTest <- function(
   data.use <- data.use[, rownames(x = group.info), drop = FALSE]
 
   # define the replicate
-  replicates <- replicates[rownames(group.info)]
+  replicate.var <- replicate.var[rownames(group.info)]
   group.info[, "replicate"] <- replicate.var
 
   # setup parallels
