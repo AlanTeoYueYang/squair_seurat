@@ -829,7 +829,7 @@ FindMarkers.Seurat <- function(
     replicates <- FetchData(
       object = object,
       vars = replicate.var,
-      cells = c(cells.1, cells.2)
+      cells = c(ident.1, ident.2)
     )
     replicate.var <- setNames(replicates[,1], rownames(replicates))
   }
