@@ -1690,6 +1690,10 @@ MixedModelTest <- function(
     "GENE ~",
     paste(latent.var.names, collapse = "+")
   ))
+  message("..using formula: ",
+    paste0("GENE ~ ", paste(latent.var.names, collapse = "+")),
+    " with random term (1|replicate)"
+  )
 
   p_val <- my.sapply(
     X = 1:nrow(x = data.use),
@@ -1701,10 +1705,13 @@ MixedModelTest <- function(
         replicate = group.info[, 'replicate']
       )
       return(
-        anova(lme(
-          fmla, random = ~1|replicate, data = df
+        tryCatch({
+          anova(lme(
+            fmla, random = ~1|replicate, data = df
         ))['group',]$`p-value`
+      }, error = function(e) NA_real_
       )
+    )
     }
   )
   return(data.frame(p_val, row.names = rownames(x = data.use)))
