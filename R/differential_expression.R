@@ -672,13 +672,32 @@ FindMarkers.default <- function(
       latent.vars = latent.vars,
       verbose = verbose
     ),
-    "mixedmodel" = MixedModelTest(
+    "mixed_lm" = MixedModelTest(
       data.use = object[features, c(cells.1, cells.2), drop = FALSE],
       cells.1 = cells.1,
       cells.2 = cells.2,
       latent.vars = latent.vars,
       verbose = verbose,
-      replicate.var = replicate.var
+      replicate.var = replicate.var,
+      family = test.use
+    ),
+    "mixed_nbinom" = MixedModelTest(
+      data.use = object[features, c(cells.1, cells.2), drop = FALSE],
+      cells.1 = cells.1,
+      cells.2 = cells.2,
+      latent.vars = latent.vars,
+      verbose = verbose,
+      replicate.var = replicate.var,
+      family = test.use
+    ),
+    "mixed_poisson" = MixedModelTest(
+      data.use = object[features, c(cells.1, cells.2), drop = FALSE],
+      cells.1 = cells.1,
+      cells.2 = cells.2,
+      latent.vars = latent.vars,
+      verbose = verbose,
+      replicate.var = replicate.var,
+      family = test.use
     ),
     stop("Unknown test: ", test.use)
   )
@@ -1632,13 +1651,20 @@ WilcoxDETest <- function(
 # @param replicates vector of replicates for object
 # @param latent.vars Confounding variables to adjust for in DE test. Default is NULL.
 # @param ... Extra parameters passed to lme
+# @param family character string specifying which mixed model to fit:
+#   \code{"mixed_lm"} for \code{\link[lme4:lmer]{lmer}},
+#   \code{"mixed_poisson"} for \code{\link[blme:blmer]{bglmer}},
+#   \code{"mixed_nbinom"} for \code{\link[glmmTMB]{glmmTMB}}.
 #
 # @return Returns a p-value ranked matrix of putative differentially expressed
 # features
 #
 #' @importFrom pbapply pbsapply
-#' @importFrom stats anova
-#' @importFrom nlme lme
+#' @importFrom lme4 .makeCC lmerControl
+#' @importFrom lmerTest lmer
+#' @importFrom blme bglmer
+#' @importFrom stats coef
+#' @importFrom glmmTMB glmmTMB
 #' @importFrom future.apply future_sapply
 #' @importFrom future nbrOfWorkers
 #
@@ -1652,6 +1678,7 @@ MixedModelTest <- function(
   cells.2,
   verbose = TRUE,
   latent.vars = NULL,
+  family = c("mixed_lm", "mixed_nbinom", "mixed_poisson"),
   replicate.var,
   ...
 ) {
@@ -1686,10 +1713,14 @@ MixedModelTest <- function(
   )
 
   # define the formula to use
-  fmla <- as.formula(object = paste(
+  fmla <- paste(
     "GENE ~",
     paste(latent.var.names, collapse = "+")
-  ))
+  )
+
+  # add in the random term
+  fmla = as.formula(paste(fmla, "+", "(1|replicate)"))
+
   message("..using formula: ",
     paste0("GENE ~ ", paste(latent.var.names, collapse = "+")),
     " with random term (1|replicate)"
@@ -1706,9 +1737,21 @@ MixedModelTest <- function(
       )
       return(
         tryCatch({
-          anova(lme(
-            fmla, random = ~1|replicate, data = df
-        ))['group',]$`p-value`
+          switch(family,
+            mixed_lm =
+              coef(summary(
+                lmer(fmla, df, REML = TRUE, control = lmerControl(
+                  check.conv.singular = .makeCC(action = "ignore", tol = 1e-4)))
+              ))['group', 5],
+            mixed_nbinom =
+              coef(summary(
+                glmmTMB(fmla, df, family = nbinom1, REML = FALSE)
+              ))[[1]]['group', 4],
+            mixed_poisson =
+              coef(summary(
+                bglmer(fmla, df, family = 'poisson')
+              ))['group', 4]
+              )
       }, error = function(e) NA_real_
       )
     )
