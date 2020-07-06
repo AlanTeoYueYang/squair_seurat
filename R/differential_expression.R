@@ -1664,7 +1664,7 @@ WilcoxDETest <- function(
 #' @importFrom lmerTest lmer
 #' @importFrom blme bglmer
 #' @importFrom stats coef
-#' @importFrom glmmTMB glmmTMB
+#' @importFrom glmmTMB glmmTMB nbinom1
 #' @importFrom future.apply future_sapply
 #' @importFrom future nbrOfWorkers
 #
