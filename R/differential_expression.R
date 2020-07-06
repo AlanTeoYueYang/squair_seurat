@@ -1735,6 +1735,8 @@ MixedModelTest <- function(
         group = group.info[, 'group'],
         replicate = group.info[, 'replicate']
       )
+      # define coefficient
+      coef = paste0("group", levels(df$group)[2])
       return(
         tryCatch({
           switch(family,
@@ -1742,15 +1744,15 @@ MixedModelTest <- function(
               coef(summary(
                 lmer(fmla, df, REML = TRUE, control = lmerControl(
                   check.conv.singular = .makeCC(action = "ignore", tol = 1e-4)))
-              ))['group', 5],
+              ))[coef, 5],
             mixed_nbinom =
               coef(summary(
                 glmmTMB(fmla, df, family = nbinom1, REML = FALSE)
-              ))[[1]]['group', 4],
+              ))[[1]][coef, 4],
             mixed_poisson =
               coef(summary(
                 bglmer(fmla, df, family = 'poisson')
-              ))['group', 4]
+              ))[coef, 4]
               )
       }, error = function(e) NA_real_
       )
