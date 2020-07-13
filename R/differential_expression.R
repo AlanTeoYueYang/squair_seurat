@@ -1470,16 +1470,21 @@ MASTDETest <- function(
     object = paste0(" ~ ", paste(latent.vars.names, collapse = "+"))
   )
   zlmCond <- MAST::zlm(formula = fmla, sca = sca, ...)
-  summaryCond <- summary(object = zlmCond, doLRT = 'conditionGroup2')
-  summaryDt <- summaryCond$datatable
-  # fcHurdle <- merge(
-  #   summaryDt[contrast=='conditionGroup2' & component=='H', .(primerid, `Pr(>Chisq)`)], #hurdle P values
-  #   summaryDt[contrast=='conditionGroup2' & component=='logFC', .(primerid, coef, ci.hi, ci.lo)], by='primerid'
-  # ) #logFC coefficients
-  # fcHurdle[,fdr:=p.adjust(`Pr(>Chisq)`, 'fdr')]
-  p_val <- summaryDt[summaryDt[, "component"] == "H", 4]
-  test_statistic <- summaryDt[summaryDt[, "component"] == "D" & summaryDt[, "contrast"] == "conditionGroup2", 7]
-  genes.return <- summaryDt[summaryDt[, "component"] == "H", 1]
+  # do LRT
+  lrt <- MAST::lrTest(zlmCond, 'condition')
+  p_val <- lrt[, 'hurdle', 'Pr(>Chisq)']
+  test_statistic <- lrt[, 'hurdle', 'lambda']
+  genes.return <- rownames(x = lrt)
+  # summaryCond <- summary(object = zlmCond, doLRT = 'conditionGroup2')
+  # summaryDt <- summaryCond$datatable
+  # # fcHurdle <- merge(
+  # #   summaryDt[contrast=='conditionGroup2' & component=='H', .(primerid, `Pr(>Chisq)`)], #hurdle P values
+  # #   summaryDt[contrast=='conditionGroup2' & component=='logFC', .(primerid, coef, ci.hi, ci.lo)], by='primerid'
+  # # ) #logFC coefficients
+  # # fcHurdle[,fdr:=p.adjust(`Pr(>Chisq)`, 'fdr')]
+  # p_val <- summaryDt[summaryDt[, "component"] == "H", 4]
+  # test_statistic <- summaryDt[summaryDt[, "component"] == "D" & summaryDt[, "contrast"] == "conditionGroup2", 7]
+  # genes.return <- summaryDt[summaryDt[, "component"] == "H", 1]
   # p_val <- subset(summaryDt, component == "H")[, 4]
   # genes.return <- subset(summaryDt, component == "H")[, 1]
   to.return <- data.frame(p_val = p_val, test_statistic = test_statistic,
