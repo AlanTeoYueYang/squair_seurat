@@ -1034,7 +1034,9 @@ DifferentialLRT <- function(x, y, xmin = 0) {
   lrtY <- bimodLikData(x = y)
   lrtZ <- bimodLikData(x = c(x, y))
   lrt_diff <- 2 * (lrtX + lrtY - lrtZ)
-  return(pchisq(q = lrt_diff, df = 3, lower.tail = F))
+  # calculate p value
+  p_val = pchisq(q = lrt_diff, df = 3, lower.tail = F)
+  return(data.frame(p_val = p_val, test_statistic = lrt_diff))
 }
 
 # Likelihood ratio test for zero-inflated data
@@ -1071,7 +1073,7 @@ DiffExpTest <- function(
     yes = pbsapply,
     no = future_sapply
   )
-  p_val <- unlist(
+  result <- unlist(
     x = my.sapply(
       X = 1:nrow(x = data.use),
       FUN = function(x) {
@@ -1082,8 +1084,14 @@ DiffExpTest <- function(
       }
     )
   )
-  to.return <- data.frame(p_val, row.names = rownames(x = data.use))
-  return(to.return)
+  # format the results properly, returning the test statistic
+  vec = unlist(result)
+  p_val = vec[seq(1,length(vec),2)]
+  test_statistic = vec[seq(2,length(vec),2)]
+  return(data.frame(p_val = p_val, test_statistic = test_statistic,
+                    row.names = rownames(x = data.use)))
+  # to.return <- data.frame(p_val, row.names = rownames(x = data.use))
+  # return(to.return)
 }
 
 # Differential expression testing using Student's t-test
@@ -1116,16 +1124,34 @@ DiffTTest <- function(
     yes = pbsapply,
     no = future_sapply
   )
-  p_val <- unlist(
-    x = my.sapply(
-      X = 1:nrow(data.use),
-      FUN = function(x) {
-        t.test(x = data.use[x, cells.1], y = data.use[x, cells.2])$p.value
-      }
-    )
+  result <- my.sapply(
+    X = 1:nrow(x = data.use),
+    FUN = function(x) {
+      # get the p_value and the test statistic
+      t = t.test(data.use[x,] ~ group.info[, "group"], ...)
+      p_val = t$p.value
+      test_statistic = t$statistic
+      return(data.frame(p_val = p_val, test_statistic = test_statistic))
+    }
   )
-  to.return <- data.frame(p_val,row.names = rownames(x = data.use))
-  return(to.return)
+  # format the results properly
+  vec = unlist(result)
+  p_val = vec[seq(1,length(vec),2)]
+  test_statistic = vec[seq(2,length(vec),2)]
+  return(data.frame(p_val = p_val, test_statistic = test_statistic,
+    row.names = rownames(x = data.use)))
+  # }
+  # return(result, row.names = rownames(x = data.use))
+  # p_val <- unlist(
+  #   x = my.sapply(
+  #     X = 1:nrow(data.use),
+  #     FUN = function(x) {
+  #       t.test(x = data.use[x, cells.1], y = data.use[x, cells.2])$p.value
+  #     }
+  #   )
+  # )
+  # to.return <- data.frame(p_val,row.names = rownames(x = data.use))
+  # return(to.return)
 }
 
 # Tests for UMI-count based data
@@ -1186,7 +1212,7 @@ GLMDETest <- function(
     yes = pbsapply,
     no = future_sapply
   )
-  p_val <- unlist(
+  result <- unlist(
     x = my.sapply(
       X = 1:nrow(data.use),
       FUN = function(x) {
@@ -1201,7 +1227,7 @@ GLMDETest <- function(
             min.cells,
             " cells in both clusters."
           ))
-          return(2)
+          return(c(NA_real_, NA_real_))
         }
         # check that variance between groups is not 0
         if (var(x = latent.vars$GENE) == 0) {
@@ -1210,38 +1236,54 @@ GLMDETest <- function(
             x,
             ". No variance in expression between the two clusters."
           ))
-          return(2)
+          return(c(NA_real_, NA_real_))
         }
         fmla <- as.formula(object = paste(
           "GENE ~",
           paste(latent.var.names, collapse = "+")
         ))
-        p.estimate <- 2
+        p.estimate <- NA_real_
+        test_statistic <- NA_real_
         if (test.use == "negbinom") {
-          try(
-            expr = p.estimate <- summary(
-              object = glm.nb(formula = fmla, data = latent.vars)
-            )$coef[2, 4],
-            silent = TRUE
+          try({
+            object <- summary(glm.nb(formula = fmla, data = latent.vars))
+            p.estimate <- object$coef[2,4]
+            test_statistic <- object$coef[2,1]
+          }
+            # expr = p.estimate <- summary(
+            #   object = glm.nb(formula = fmla, data = latent.vars)
+            # )$coef[2, 4],
+            # silent = TRUE
           )
-          return(p.estimate)
+          return(c(p.estimate, test_statistic))
         } else if (test.use == "poisson") {
-          return(summary(object = glm(
-            formula = fmla,
-            data = latent.vars,
-            family = "poisson"
-          ))$coef[2,4])
+          object <- summary(glm(formula = fmla, data = latent.vars,
+              family = 'poisson'))
+          p.estimate <- object$coef[2,4]
+          test_statistic <- object$coef[2,1]
+          # return(summary(object = glm(
+          #   formula = fmla,
+          #   data = latent.vars,
+          #   family = "poisson"
+          # ))$coef[2,4])
+          return(c(p.estimate, test_statistic))
         }
       }
     )
   )
-  features.keep <- rownames(data.use)
-  if (length(x = which(x = p_val == 2)) > 0) {
-    features.keep <- features.keep[-which(x = p_val == 2)]
-    p_val <- p_val[!p_val == 2]
-  }
-  to.return <- data.frame(p_val, row.names = features.keep)
-  return(to.return)
+  # format the results properly
+  out <- data.frame(t(result))
+  colnames(out) <- c("p_val", "test_statistic")
+  rownames(out) = rownames(data.use)
+  # features.keep <- rownames(data.use)
+  # if (length(x = which(x = out$p_val == 2)) > 0) {
+  #   features.keep <- features.keep[-which(x = out$p_val == 2)]
+  #   out = out[out$p_val != 2,]
+  #   # p_val <- p_val[!p_val == 2]
+  # }
+  # to.return <- data.frame(p_val, row.names = features.keep)
+  # return(to.return)
+  return(out)
 }
 
 # Perform differential expression testing using a logistic regression framework
@@ -1279,7 +1321,7 @@ LRDETest <- function(
     yes = pbsapply,
     no = future_sapply
   )
-  p_val <- my.sapply(
+  result <- my.sapply(
     X = 1:nrow(x = data.use),
     FUN = function(x) {
       if (is.null(x = latent.vars)) {
@@ -1300,11 +1342,19 @@ LRDETest <- function(
       model1 <- glm(formula = fmla, data = model.data, family = "binomial")
       model2 <- glm(formula = fmla2, data = model.data, family = "binomial")
       lrtest <- lrtest(model1, model2)
-      return(lrtest$Pr[2])
+      p_val = lrtest$Pr[2]
+      test_statistic = lrtest$Chisq[2]
+      return(c(p_val, test_statistic))
     }
   )
-  to.return <- data.frame(p_val, row.names = rownames(data.use))
-  return(to.return)
+  # format the results properly
+  vec = unlist(result)
+  p_val = vec[seq(1,length(vec),2)]
+  test_statistic = vec[seq(2,length(vec),2)]
+  return(data.frame(p_val = p_val, test_statistic = test_statistic,
+                    row.names = rownames(x = data.use)))
+  # to.return <- data.frame(p_val, row.names = rownames(data.use))
+  # return(to.return)
 }
 
 # ROC-based marker discovery
@@ -1428,10 +1478,12 @@ MASTDETest <- function(
   # ) #logFC coefficients
   # fcHurdle[,fdr:=p.adjust(`Pr(>Chisq)`, 'fdr')]
   p_val <- summaryDt[summaryDt[, "component"] == "H", 4]
+  test_statistic <- summaryDt[summaryDt[, "component"] == "D" & summaryDt[, "contrast"] == "conditionGroup2", 7]
   genes.return <- summaryDt[summaryDt[, "component"] == "H", 1]
   # p_val <- subset(summaryDt, component == "H")[, 4]
   # genes.return <- subset(summaryDt, component == "H")[, 1]
-  to.return <- data.frame(p_val, row.names = genes.return)
+  to.return <- data.frame(p_val = p_val, test_statistic = test_statistic,
+      row.names = genes.return)
   return(to.return)
 }
 
@@ -1601,42 +1653,53 @@ WilcoxDETest <- function(
     yes = pbsapply,
     no = future_sapply
   )
-  limma.check <- PackageCheck("limma", error = FALSE)
-  if (limma.check[1]) {
-    p_val <- my.sapply(
-      X = 1:nrow(x = data.use),
-      FUN = function(x) {
-        return(min(2 * min(limma::rankSumTestWithCorrelation(index = j, statistics = data.use[x, ])), 1))
-      }
-    )
-  } else {
-    if (getOption('Seurat.limma.wilcox.msg', TRUE)) {
-      message(
-        "For a more efficient implementation of the Wilcoxon Rank Sum Test,",
-        "\n(default method for FindMarkers) please install the limma package",
-        "\n--------------------------------------------",
-        "\ninstall.packages('BiocManager')",
-        "\nBiocManager::install('limma')",
-        "\n--------------------------------------------",
-        "\nAfter installation of limma, Seurat will automatically use the more ",
-        "\nefficient implementation (no further action necessary).",
-        "\nThis message will be shown once per session"
-      )
-      options(Seurat.limma.wilcox.msg = FALSE)
+  ## We need to turn off the limma implementation, since the test statistic isn't given
+  # limma.check <- PackageCheck("limma", error = FALSE)
+  # if (limma.check[1]) {
+  #   p_val <- my.sapply(
+  #     X = 1:nrow(x = data.use),
+  #     FUN = function(x) {
+  #       return(min(2 * min(limma::rankSumTestWithCorrelation(index = j, statistics = data.use[x, ])), 1))
+  #     }
+  #   )
+  # } else {
+  #   if (getOption('Seurat.limma.wilcox.msg', TRUE)) {
+  #     message(
+  #       "For a more efficient implementation of the Wilcoxon Rank Sum Test,",
+  #       "\n(default method for FindMarkers) please install the limma package",
+  #       "\n--------------------------------------------",
+  #       "\ninstall.packages('BiocManager')",
+  #       "\nBiocManager::install('limma')",
+  #       "\n--------------------------------------------",
+  #       "\nAfter installation of limma, Seurat will automatically use the more ",
+  #       "\nefficient implementation (no further action necessary).",
+  #       "\nThis message will be shown once per session"
+  #     )
+  #     options(Seurat.limma.wilcox.msg = FALSE)
+  #   }
+  group.info <- data.frame(row.names = c(cells.1, cells.2))
+  group.info[cells.1, "group"] <- "Group1"
+  group.info[cells.2, "group"] <- "Group2"
+  group.info[, "group"] <- factor(x = group.info[, "group"])
+  data.use <- data.use[, rownames(x = group.info), drop = FALSE]
+  result <- my.sapply(
+    X = 1:nrow(x = data.use),
+    FUN = function(x) {
+      # get the p_value and the test statistic
+      w = wilcox.test(data.use[x,] ~ group.info[, "group"], ...)
+      p_val = w$p.value
+      test_statistic = w$statistic
+      return(data.frame(p_val = p_val, test_statistic = test_statistic))
     }
-    group.info <- data.frame(row.names = c(cells.1, cells.2))
-    group.info[cells.1, "group"] <- "Group1"
-    group.info[cells.2, "group"] <- "Group2"
-    group.info[, "group"] <- factor(x = group.info[, "group"])
-    data.use <- data.use[, rownames(x = group.info), drop = FALSE]
-    p_val <- my.sapply(
-      X = 1:nrow(x = data.use),
-      FUN = function(x) {
-        return(wilcox.test(data.use[x, ] ~ group.info[, "group"], ...)$p.value)
-      }
-    )
-  }
-  return(data.frame(p_val, row.names = rownames(x = data.use)))
+  )
+  # format the results properly
+  vec = unlist(result)
+  p_val = vec[seq(1,length(vec),2)]
+  test_statistic = vec[seq(2,length(vec),2)]
+  return(data.frame(p_val = p_val, test_statistic = test_statistic,
+    row.names = rownames(x = data.use)))
+  # }
+  # return(result, row.names = rownames(x = data.use))
 }
 
 # Differential expression using Mixed model to control for replicate
@@ -1726,7 +1789,7 @@ MixedModelTest <- function(
     " with random term (1|replicate)"
   )
 
-  p_val <- my.sapply(
+  result <- my.sapply(
     X = 1:nrow(x = data.use),
     FUN = function(x) {
       # construct object to test
@@ -1740,24 +1803,42 @@ MixedModelTest <- function(
       return(
         tryCatch({
           switch(family,
-            mixed_lm =
-              coef(summary(
+            mixed_lm = {
+              tab <- coef(summary(
                 lmer(fmla, df, REML = TRUE, control = lmerControl(
                   check.conv.singular = .makeCC(action = "ignore", tol = 1e-4)))
-              ))[coef, 5],
-            mixed_nbinom =
-              coef(summary(
+              ))
+              p_val <- tab[coef,5]
+              test_statistic <- tab[coef,1]
+              return(c(p_val, test_statistic))
+            },
+            mixed_nbinom = {
+              tab <- coef(summary(
                 glmmTMB(fmla, df, family = nbinom1, REML = FALSE)
-              ))[[1]][coef, 4],
-            mixed_poisson =
-              coef(summary(
+              ))[[1]]
+              p_val <- tab[coef,4]
+              test_statistic <- tab[coef,1]
+              return(c(p_val, test_statistic))
+            },
+            mixed_poisson = {
+              tab <- coef(summary(
                 bglmer(fmla, df, family = 'poisson')
-              ))[coef, 4]
+              ))
+              p_val <- tab[coef, 4]
+              test_statistic <- tab[coef, 1]
+              return(c(p_val, test_statistic))
+            }
               )
-      }, error = function(e) NA_real_
+      }, error = function(e) c(NA_real_, NA_real_)
       )
     )
     }
   )
-  return(data.frame(p_val, row.names = rownames(x = data.use)))
+  # format the results properly
+  vec = unlist(result)
+  p_val = vec[seq(1,length(vec),2)]
+  test_statistic = vec[seq(2,length(vec),2)]
+  return(data.frame(p_val = p_val, test_statistic = test_statistic,
+                    row.names = rownames(x = data.use)))
+  # return(data.frame(p_val, row.names = rownames(x = data.use)))
 }
