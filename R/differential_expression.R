@@ -1248,7 +1248,7 @@ GLMDETest <- function(
           try({
             object <- summary(glm.nb(formula = fmla, data = latent.vars))
             p.estimate <- object$coef[2,4]
-            test_statistic <- object$coef[2,1]
+            test_statistic <- object$coef[2,3]
           }
             # expr = p.estimate <- summary(
             #   object = glm.nb(formula = fmla, data = latent.vars)
@@ -1260,7 +1260,7 @@ GLMDETest <- function(
           object <- summary(glm(formula = fmla, data = latent.vars,
               family = 'poisson'))
           p.estimate <- object$coef[2,4]
-          test_statistic <- object$coef[2,1]
+          test_statistic <- object$coef[2,3]
           # return(summary(object = glm(
           #   formula = fmla,
           #   data = latent.vars,
@@ -1636,6 +1636,7 @@ RegularizedTheta <- function(cm, latent.data, min.theta = 0.01, bin.size = 128) 
 #' @importFrom stats wilcox.test
 #' @importFrom future.apply future_sapply
 #' @importFrom future nbrOfWorkers
+#' @importFrom presto wilcoxauc
 #
 # @export
 #
@@ -1687,22 +1688,30 @@ WilcoxDETest <- function(
   group.info[cells.2, "group"] <- "Group2"
   group.info[, "group"] <- factor(x = group.info[, "group"])
   data.use <- data.use[, rownames(x = group.info), drop = FALSE]
-  result <- my.sapply(
-    X = 1:nrow(x = data.use),
-    FUN = function(x) {
-      # get the p_value and the test statistic
-      w = wilcox.test(data.use[x,] ~ group.info[, "group"], ...)
-      p_val = w$p.value
-      test_statistic = w$statistic
-      return(data.frame(p_val = p_val, test_statistic = test_statistic))
-    }
-  )
-  # format the results properly
-  vec = unlist(result)
-  p_val = vec[seq(1,length(vec),2)]
-  test_statistic = vec[seq(2,length(vec),2)]
-  return(data.frame(p_val = p_val, test_statistic = test_statistic,
-    row.names = rownames(x = data.use)))
+  # use presto
+  result <- wilcoxauc(X = data.use, y = group.info[, "group"], ...)
+  result <- result[w$group == 'Group2', c("pval", "z")]
+  colnames(x = result) <- c("p_val", "test_statistic")
+  rownames(x = result) <- rownames(x = data.use)
+  return(result)
+  # result <- my.sapply(
+  #   X = 1:nrow(x = data.use),
+  #   FUN = function(x) {
+  #     # get the p_value and the test statistic
+  #     # w = wilcox.test(data.use[x,] ~ group.info[, "group"], ...)
+  #     w = wilcoxauc(X = t(as.matrix(data.use[x,])), y = group.info[, "group"], ...)
+  #     w = w[w$group == 'Group2', ]
+  #     p_val = w$pval
+  #     test_statistic = w$z
+  #     return(data.frame(p_val = p_val, test_statistic = test_statistic))
+  #   }
+  # )
+  # # format the results properly
+  # vec = unlist(result)
+  # p_val = vec[seq(1,length(vec),2)]
+  # test_statistic = vec[seq(2,length(vec),2)]
+  # return(data.frame(p_val = p_val, test_statistic = test_statistic,
+  #   row.names = rownames(x = data.use)))
   # }
   # return(result, row.names = rownames(x = data.use))
 }
@@ -1814,7 +1823,7 @@ MixedModelTest <- function(
                   check.conv.singular = .makeCC(action = "ignore", tol = 1e-4)))
               ))
               p_val <- tab[coef,5]
-              test_statistic <- tab[coef,1]
+              test_statistic <- tab[coef,4]
               return(c(p_val, test_statistic))
             },
             mixed_nbinom = {
@@ -1822,7 +1831,7 @@ MixedModelTest <- function(
                 glmmTMB(fmla, df, family = nbinom1, REML = FALSE)
               ))[[1]]
               p_val <- tab[coef,4]
-              test_statistic <- tab[coef,1]
+              test_statistic <- tab[coef,3]
               return(c(p_val, test_statistic))
             },
             mixed_poisson = {
@@ -1830,7 +1839,7 @@ MixedModelTest <- function(
                 bglmer(fmla, df, family = 'poisson')
               ))
               p_val <- tab[coef, 4]
-              test_statistic <- tab[coef, 1]
+              test_statistic <- tab[coef, 3]
               return(c(p_val, test_statistic))
             }
               )
