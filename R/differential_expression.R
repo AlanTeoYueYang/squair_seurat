@@ -1128,7 +1128,7 @@ DiffTTest <- function(
     X = 1:nrow(x = data.use),
     FUN = function(x) {
       # get the p_value and the test statistic
-      t = t.test(data.use[x,] ~ group.info[, "group"], ...)
+      t = t.test(data.use[x,] ~ group.info[, "group"])
       p_val = t$p.value
       test_statistic = t$statistic
       return(data.frame(p_val = p_val, test_statistic = test_statistic))
