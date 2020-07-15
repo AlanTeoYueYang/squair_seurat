@@ -1690,7 +1690,7 @@ WilcoxDETest <- function(
   data.use <- data.use[, rownames(x = group.info), drop = FALSE]
   # use presto
   result <- wilcoxauc(X = data.use, y = group.info[, "group"], ...)
-  result <- result[w$group == 'Group2', c("pval", "z")]
+  result <- result[result$group == 'Group2', c("pval", "z")]
   colnames(x = result) <- c("p_val", "test_statistic")
   rownames(x = result) <- rownames(x = data.use)
   return(result)
