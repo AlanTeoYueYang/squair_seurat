@@ -783,7 +783,7 @@ FindMarkers.Seurat <- function(
     stop("Please only specify either assay or reduction.")
   }
   data.slot <- ifelse(
-    test = test.use %in% c("negbinom", "poisson", "DESeq2"),
+    test = test.use %in% c("negbinom", "poisson", "DESeq2", "mixed_nbinom", "mixed_poisson"),
     yes = 'counts',
     no = slot
   )
