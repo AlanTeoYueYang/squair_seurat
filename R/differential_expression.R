@@ -480,6 +480,8 @@ FindMarkers.default <- function(
   min.cells.group = 3,
   pseudocount.use = 1,
   replicate.var = NULL,
+  use.offset = F,
+  use.lrt = F,
   ...
 ) {
   features <- features %||% rownames(x = object)
@@ -679,7 +681,9 @@ FindMarkers.default <- function(
       latent.vars = latent.vars,
       verbose = verbose,
       replicate.var = replicate.var,
-      family = test.use
+      family = test.use,
+      use.offset = use.offset,
+      use.lrt = use.lrt
     ),
     "mixed_nbinom" = MixedModelTest(
       data.use = object[features, c(cells.1, cells.2), drop = FALSE],
@@ -688,7 +692,9 @@ FindMarkers.default <- function(
       latent.vars = latent.vars,
       verbose = verbose,
       replicate.var = replicate.var,
-      family = test.use
+      family = test.use,
+      use.offset = use.offset,
+      use.lrt = use.lrt
     ),
     "mixed_poisson" = MixedModelTest(
       data.use = object[features, c(cells.1, cells.2), drop = FALSE],
@@ -697,7 +703,9 @@ FindMarkers.default <- function(
       latent.vars = latent.vars,
       verbose = verbose,
       replicate.var = replicate.var,
-      family = test.use
+      family = test.use,
+      use.offset = use.offset,
+      use.lrt = use.lrt
     ),
     stop("Unknown test: ", test.use)
   )
@@ -771,6 +779,8 @@ FindMarkers.Seurat <- function(
   min.cells.group = 3,
   pseudocount.use = 1,
   replicate.var = NULL,
+  use.offset = F,
+  use.lrt = F,
   ...
 ) {
   if (!is.null(x = group.by)) {
@@ -880,6 +890,8 @@ FindMarkers.Seurat <- function(
     min.cells.group = min.cells.group,
     pseudocount.use = pseudocount.use,
     replicate.var = replicate.var,
+    use.offset = use.offset,
+    use.lrt = use.lrt,
     ...
   )
   return(de.results)
@@ -1725,13 +1737,15 @@ WilcoxDETest <- function(
 # @param cells.1 Group 1 cells
 # @param cells.2 Group 2 cells
 # @param verbose Print a progress bar
-# @param replicates vector of replicates for object
+# @param replicate.var vector of replicates for object
+# @param use.offset correct for total counts in the model
+# @param use.lrt Use a LRT as the statistical test
 # @param latent.vars Confounding variables to adjust for in DE test. Default is NULL.
-# @param ... Extra parameters passed to lme
 # @param family character string specifying which mixed model to fit:
 #   \code{"mixed_lm"} for \code{\link[lme4:lmer]{lmer}},
 #   \code{"mixed_poisson"} for \code{\link[blme:blmer]{bglmer}},
 #   \code{"mixed_nbinom"} for \code{\link[glmmTMB]{glmmTMB}}.
+# @param ... Extra parameters passed to lme
 #
 # @return Returns a p-value ranked matrix of putative differentially expressed
 # features
@@ -1744,6 +1758,9 @@ WilcoxDETest <- function(
 #' @importFrom glmmTMB glmmTMB nbinom1
 #' @importFrom future.apply future_sapply
 #' @importFrom future nbrOfWorkers
+#' @importFrom Matrix colSums
+#' @importFrom lmtest lrtest
+#' @importFrom stats anova
 #
 # @export
 #
@@ -1757,6 +1774,8 @@ MixedModelTest <- function(
   latent.vars = NULL,
   family = c("mixed_lm", "mixed_nbinom", "mixed_poisson"),
   replicate.var,
+  use.offset = F,
+  use.lrt = F,
   ...
 ) {
   # setup meta data
@@ -1795,13 +1814,23 @@ MixedModelTest <- function(
     paste(latent.var.names, collapse = "+")
   )
 
-  # add in the random term
-  fmla = as.formula(paste(fmla, "+", "(1|replicate)"))
-
-  message("..using formula: ",
-    paste0("GENE ~ ", paste(latent.var.names, collapse = "+")),
-    " with random term (1|replicate)"
-  )
+  # add in the random term and offset if required
+  if (use.offset == F) {
+    fmla = as.formula(paste(fmla, "+", "(1|replicate)"))
+    message("..using formula: ",
+      paste0("GENE ~ ", paste(latent.var.names, collapse = "+")),
+      " with random term (1|replicate)"
+    )
+  } else if (use.offset == T) {
+    total_counts = colSums(data.use)
+    group.info[, "total_counts"] <- total_counts
+    fmla = as.formula(paste(fmla, "+ offset(log(total_counts)) +", "(1|replicate)"))
+    message("..using formula: ",
+      paste0("GENE ~ ", paste(latent.var.names, collapse = "+")),
+      " with a total counts correction term offset(log(total_counts)) and",
+      " with random term (1|replicate)"
+    )
+  }
 
   result <- my.sapply(
     X = 1:nrow(x = data.use),
@@ -1818,28 +1847,57 @@ MixedModelTest <- function(
         tryCatch({
           switch(family,
             mixed_lm = {
-              tab <- coef(summary(
-                lmer(fmla, df, REML = TRUE, control = lmerControl(
+              if (use.lrt == T) {
+                null_fmla = as.formula(gsub("group \\+ ", " ", deparse(fmla)))
+                mod1 = lmer(fmla, df, REML = TRUE, control = lmerControl(
                   check.conv.singular = .makeCC(action = "ignore", tol = 1e-4)))
-              ))
-              p_val <- tab[coef,5]
-              test_statistic <- tab[coef,4]
+                mod2 = lmer(null_fmla, df, REML = TRUE, control = lmerControl(
+                  check.conv.singular = .makeCC(action = "ignore", tol = 1e-4)))
+                lrt = anova(mod1, mod2, refit = F)
+                p_val = lrt$`Pr(>Chisq)`[2]
+                test_statistic = lrt$Chisq[2]
+              } else if (use.lrt == F) {
+                tab <- coef(summary(
+                  lmer(fmla, df, REML = TRUE, control = lmerControl(
+                    check.conv.singular = .makeCC(action = "ignore", tol = 1e-4)))
+                ))
+                p_val <- tab[coef,5]
+                test_statistic <- tab[coef,4]
+              }
               return(c(p_val, test_statistic))
             },
             mixed_nbinom = {
-              tab <- coef(summary(
-                glmmTMB(fmla, df, family = nbinom1, REML = FALSE)
-              ))[[1]]
-              p_val <- tab[coef,4]
-              test_statistic <- tab[coef,3]
+              if (use.lrt == T) {
+                null_fmla = as.formula(gsub("group \\+ ", " ", deparse(fmla)))
+                mod1 = glmmTMB(fmla, df, family = nbinom1, REML = FALSE)
+                mod2 = glmmTMB(null_fmla, df, family = nbinom1, REML = FALSE)
+                lrt = anova(mod1, mod2, refit = F)
+                p_val = lrt$`Pr(>Chisq)`[2]
+                test_statistic = lrt$Chisq[2]
+              } else if (use.lrt == F) {
+                tab <- coef(summary(
+                  glmmTMB(fmla, df, family = nbinom1, REML = FALSE)
+                ))[[1]]
+                p_val <- tab[coef,4]
+                test_statistic <- tab[coef,3]
+              }
               return(c(p_val, test_statistic))
             },
             mixed_poisson = {
-              tab <- coef(summary(
-                bglmer(fmla, df, family = 'poisson')
-              ))
-              p_val <- tab[coef, 4]
-              test_statistic <- tab[coef, 3]
+              if (use.lrt == T) {
+                null_fmla = as.formula(gsub("group \\+ ", " ", deparse(fmla)))
+                mod1 = bglmer(fmla, df, family = 'poisson')
+                mod2 = bglmer(null_fmla, df, family = 'poisson')
+                lrt = anova(mod1, mod2, refit = F)
+                p_val = lrt$`Pr(>Chisq)`[2]
+                test_statistic = lrt$Chisq[2]
+              } else if (use.lrt == F) {
+                tab <- coef(summary(
+                  bglmer(fmla, df, family = 'poisson')
+                ))
+                p_val <- tab[coef, 4]
+                test_statistic <- tab[coef, 3]
+              }
               return(c(p_val, test_statistic))
             }
               )
