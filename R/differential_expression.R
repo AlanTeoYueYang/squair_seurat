@@ -430,7 +430,6 @@ FindConservedMarkers <- function(
 #'  minimum detection rate (min.pct) across both cell groups. To use this method,
 #'  please install DESeq2, using the instructions at
 #'  https://bioconductor.org/packages/release/bioc/html/DESeq2.html
-#'  \item{"mixedmodel"} : In development: use mixed models.
 #' }
 #' @param min.pct  only test genes that are detected in a minimum fraction of
 #' min.pct cells in either of the two populations. Meant to speed up the function
@@ -449,8 +448,6 @@ FindConservedMarkers <- function(
 #' @param min.cells.group Minimum number of cells in one of the groups
 #' @param pseudocount.use Pseudocount to add to averaged expression values when
 #' calculating logFC. 1 by default.
-#' @param replicate_col Column of meta data containing replicate information. NULL
-#' by default.
 #'
 #' @importFrom Matrix rowSums rowMeans
 #' @importFrom stats p.adjust
@@ -479,7 +476,6 @@ FindMarkers.default <- function(
   min.cells.feature = 3,
   min.cells.group = 3,
   pseudocount.use = 1,
-  replicate.var = NULL,
   ...
 ) {
   features <- features %||% rownames(x = object)
@@ -604,7 +600,6 @@ FindMarkers.default <- function(
   if (!test.use %in% c('wilcox', 'MAST', 'DESeq2')) {
     CheckDots(...)
   }
-
   de.results <- switch(
     EXPR = test.use,
     'wilcox' = WilcoxDETest(
@@ -672,38 +667,11 @@ FindMarkers.default <- function(
       latent.vars = latent.vars,
       verbose = verbose
     ),
-    "mixed_lm" = MixedModelTest(
-      data.use = object[features, c(cells.1, cells.2), drop = FALSE],
-      cells.1 = cells.1,
-      cells.2 = cells.2,
-      latent.vars = latent.vars,
-      verbose = verbose,
-      replicate.var = replicate.var,
-      family = test.use
-    ),
-    "mixed_nbinom" = MixedModelTest(
-      data.use = object[features, c(cells.1, cells.2), drop = FALSE],
-      cells.1 = cells.1,
-      cells.2 = cells.2,
-      latent.vars = latent.vars,
-      verbose = verbose,
-      replicate.var = replicate.var,
-      family = test.use
-    ),
-    "mixed_poisson" = MixedModelTest(
-      data.use = object[features, c(cells.1, cells.2), drop = FALSE],
-      cells.1 = cells.1,
-      cells.2 = cells.2,
-      latent.vars = latent.vars,
-      verbose = verbose,
-      replicate.var = replicate.var,
-      family = test.use
-    ),
     stop("Unknown test: ", test.use)
   )
   if (is.null(x = reduction)) {
     diff.col <- ifelse(
-      test = slot == "scale.data" || test.use == 'roc',
+      test = slot == "scale.data",
       yes = "avg_diff",
       no = "avg_logFC"
     )
@@ -770,7 +738,6 @@ FindMarkers.Seurat <- function(
   min.cells.feature = 3,
   min.cells.group = 3,
   pseudocount.use = 1,
-  replicate.var = NULL,
   ...
 ) {
   if (!is.null(x = group.by)) {
@@ -843,22 +810,11 @@ FindMarkers.Seurat <- function(
       cells = c(ident.1, ident.2)
     )
   }
-  # grab replicates
-  if (!is.null(x = replicate.var)) {
-    replicates <- FetchData(
-      object = object,
-      vars = replicate.var,
-      cells = c(ident.1, ident.2)
-    )
-    replicate.var <- setNames(replicates[,1], rownames(replicates))
-  }
-
   counts <- switch(
     EXPR = data.slot,
     'scale.data' = GetAssayData(object = object[[assay]], slot = "counts"),
     numeric()
   )
-
   de.results <- FindMarkers(
     object = data.use,
     slot = data.slot,
@@ -879,7 +835,6 @@ FindMarkers.Seurat <- function(
     min.cells.feature = min.cells.feature,
     min.cells.group = min.cells.group,
     pseudocount.use = pseudocount.use,
-    replicate.var = replicate.var,
     ...
   )
   return(de.results)
@@ -1601,163 +1556,70 @@ WilcoxDETest <- function(
     yes = pbsapply,
     no = future_sapply
   )
-  limma.check <- PackageCheck("limma", error = FALSE)
-  if (limma.check[1]) {
-    p_val <- my.sapply(
-      X = 1:nrow(x = data.use),
-      FUN = function(x) {
-        return(min(2 * min(limma::rankSumTestWithCorrelation(index = j, statistics = data.use[x, ])), 1))
-      }
-    )
-  } else {
-    if (getOption('Seurat.limma.wilcox.msg', TRUE)) {
-      message(
-        "For a more efficient implementation of the Wilcoxon Rank Sum Test,",
-        "\n(default method for FindMarkers) please install the limma package",
-        "\n--------------------------------------------",
-        "\ninstall.packages('BiocManager')",
-        "\nBiocManager::install('limma')",
-        "\n--------------------------------------------",
-        "\nAfter installation of limma, Seurat will automatically use the more ",
-        "\nefficient implementation (no further action necessary).",
-        "\nThis message will be shown once per session"
-      )
-      options(Seurat.limma.wilcox.msg = FALSE)
-    }
+  overflow.check <- ifelse(
+    test = is.na(x = suppressWarnings(length(x = data.use[1, ]) * length(x = data.use[1, ]))),
+    yes = FALSE,
+    no = TRUE
+  )
+  presto.check <- PackageCheck("presto", error = FALSE)
+  if (presto.check[1] && overflow.check) {
     group.info <- data.frame(row.names = c(cells.1, cells.2))
     group.info[cells.1, "group"] <- "Group1"
     group.info[cells.2, "group"] <- "Group2"
     group.info[, "group"] <- factor(x = group.info[, "group"])
     data.use <- data.use[, rownames(x = group.info), drop = FALSE]
-    p_val <- my.sapply(
-      X = 1:nrow(x = data.use),
-      FUN = function(x) {
-        return(wilcox.test(data.use[x, ] ~ group.info[, "group"], ...)$p.value)
-      }
-    )
-  }
-  return(data.frame(p_val, row.names = rownames(x = data.use)))
-}
-
-# Differential expression using Mixed model to control for replicate
-#
-# Identifies differentially expressed genes between two groups of cells using
-# a mixed model linear regression test.
-#
-# @param data.use Data matrix to test
-# @param cells.1 Group 1 cells
-# @param cells.2 Group 2 cells
-# @param verbose Print a progress bar
-# @param replicates vector of replicates for object
-# @param latent.vars Confounding variables to adjust for in DE test. Default is NULL.
-# @param ... Extra parameters passed to lme
-# @param family character string specifying which mixed model to fit:
-#   \code{"mixed_lm"} for \code{\link[lme4:lmer]{lmer}},
-#   \code{"mixed_poisson"} for \code{\link[blme:blmer]{bglmer}},
-#   \code{"mixed_nbinom"} for \code{\link[glmmTMB]{glmmTMB}}.
-#
-# @return Returns a p-value ranked matrix of putative differentially expressed
-# features
-#
-#' @importFrom pbapply pbsapply
-#' @importFrom lme4 .makeCC lmerControl
-#' @importFrom lmerTest lmer
-#' @importFrom blme bglmer
-#' @importFrom stats coef
-#' @importFrom glmmTMB glmmTMB nbinom1
-#' @importFrom future.apply future_sapply
-#' @importFrom future nbrOfWorkers
-#
-# @export
-#
-# @examples
-#
-MixedModelTest <- function(
-  data.use,
-  cells.1,
-  cells.2,
-  verbose = TRUE,
-  latent.vars = NULL,
-  family = c("mixed_lm", "mixed_nbinom", "mixed_poisson"),
-  replicate.var,
-  ...
-) {
-  # setup meta data
-  group.info <- data.frame(
-    group = rep(
-      x = c('Group1', 'Group2'),
-      times = c(length(x = cells.1), length(x = cells.2))
-    )
-  )
-  rownames(group.info) <- c(cells.1, cells.2)
-  group.info[, "group"] <- factor(x = group.info[, "group"])
-
-  # check for latent vars
-  latent.vars <- if (is.null(x = latent.vars)) {
-    group.info
+    result <- wilcoxauc(X = data.use, y = group.info[, "group"], ...)
+    p_val <- result[result$group == 'Group2', "pval"]
   } else {
-    cbind(x = group.info, latent.vars)
-  }
-  latent.var.names <- colnames(x = latent.vars)
-  data.use <- data.use[, rownames(x = group.info), drop = FALSE]
-
-  # define the replicate
-  replicate.var <- replicate.var[rownames(group.info)]
-  group.info[, "replicate"] <- replicate.var
-
-  # setup parallels
-  my.sapply <- ifelse(
-    test = verbose && nbrOfWorkers() == 1,
-    yes = pbsapply,
-    no = future_sapply
-  )
-
-  # define the formula to use
-  fmla <- paste(
-    "GENE ~",
-    paste(latent.var.names, collapse = "+")
-  )
-
-  # add in the random term
-  fmla = as.formula(paste(fmla, "+", "(1|replicate)"))
-
-  message("..using formula: ",
-    paste0("GENE ~ ", paste(latent.var.names, collapse = "+")),
-    " with random term (1|replicate)"
-  )
-
-  p_val <- my.sapply(
-    X = 1:nrow(x = data.use),
-    FUN = function(x) {
-      # construct object to test
-      df = data.frame(
-        GENE = data.use[x,],
-        group = group.info[, 'group'],
-        replicate = group.info[, 'replicate']
+    if (getOption('Seurat.presto.wilcox.msg', TRUE) && overflow.check) {
+      message(
+        "For a more efficient implementation of the Wilcoxon Rank Sum Test,",
+        "\n(default method for FindMarkers) please install the presto package",
+        "\n--------------------------------------------",
+        "\devtools::install_github('immunogenomics/presto')",
+        "\n--------------------------------------------",
+        "\nAfter installation of presto, Seurat will automatically use the more ",
+        "\nefficient implementation (no further action necessary).",
+        "\nThis message will be shown once per session"
       )
-      # define coefficient
-      coef = paste0("group", levels(df$group)[2])
-      return(
-        tryCatch({
-          switch(family,
-            mixed_lm =
-              coef(summary(
-                lmer(fmla, df, REML = TRUE, control = lmerControl(
-                  check.conv.singular = .makeCC(action = "ignore", tol = 1e-4)))
-              ))[coef, 5],
-            mixed_nbinom =
-              coef(summary(
-                glmmTMB(fmla, df, family = nbinom1, REML = FALSE)
-              ))[[1]][coef, 4],
-            mixed_poisson =
-              coef(summary(
-                bglmer(fmla, df, family = 'poisson')
-              ))[coef, 4]
-              )
-      }, error = function(e) NA_real_
-      )
-    )
+      options(Seurat.presto.wilcox.msg = FALSE)
     }
-  )
+
+    limma.check <- PackageCheck("limma", error = FALSE)
+    if (limma.check[1] && overflow.check) {
+      p_val <- my.sapply(
+        X = 1:nrow(x = data.use),
+        FUN = function(x) {
+          return(min(2 * min(limma::rankSumTestWithCorrelation(index = j, statistics = data.use[x, ])), 1))
+        }
+      )
+    } else {
+      if (getOption('Seurat.limma.wilcox.msg', TRUE) && overflow.check) {
+        message(
+          "For a more efficient implementation of the Wilcoxon Rank Sum Test,",
+          "\n(default method for FindMarkers) please install the limma package",
+          "\n--------------------------------------------",
+          "\ninstall.packages('BiocManager')",
+          "\nBiocManager::install('limma')",
+          "\n--------------------------------------------",
+          "\nAfter installation of limma, Seurat will automatically use the more ",
+          "\nefficient implementation (no further action necessary).",
+          "\nThis message will be shown once per session"
+        )
+        options(Seurat.limma.wilcox.msg = FALSE)
+      }
+      group.info <- data.frame(row.names = c(cells.1, cells.2))
+      group.info[cells.1, "group"] <- "Group1"
+      group.info[cells.2, "group"] <- "Group2"
+      group.info[, "group"] <- factor(x = group.info[, "group"])
+      data.use <- data.use[, rownames(x = group.info), drop = FALSE]
+      p_val <- my.sapply(
+        X = 1:nrow(x = data.use),
+        FUN = function(x) {
+          return(wilcox.test(data.use[x, ] ~ group.info[, "group"], ...)$p.value)
+        }
+      )
+    }
+  }
   return(data.frame(p_val, row.names = rownames(x = data.use)))
 }
